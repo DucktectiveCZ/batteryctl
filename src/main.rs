@@ -47,8 +47,8 @@ fn main() {
     },
     Operation::ListDevices =>
       match battery::get_devices() {
-        Ok(val) => val.iter().for_each(|it| {
-          println!("{}", it);
+        Ok(val) => val.iter().for_each(|device| {
+          println!("{}", device);
         }),
         Err(e) => eprintln!("Error: {}", e),
       },
