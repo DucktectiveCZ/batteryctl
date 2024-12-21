@@ -23,13 +23,16 @@ mod battery;
 #[derive(ValueEnum, Clone, Debug)]
 enum Operation {
   GetProperty,
+  ListDevices,
 }
 
 #[derive(Parser)]
 struct Args {
   operation: Operation,
-  device: String,
-  args: String,
+  #[arg(long, short, default_value("BAT0"))]
+  device: Option<String>,
+  #[arg(required_if_eq("operation", "get-property"))]
+  property: Option<String>,
 }
 
 fn main() {
@@ -37,10 +40,17 @@ fn main() {
   
   match args.operation {
     Operation::GetProperty => {
-      match battery::get_battery_property_raw(&args.device, &args.args) {
+      match battery::get_device_property_raw(&args.device.unwrap(), &args.property.unwrap()) {
         Ok(val) => println!("{}", val),
         Err(e) => eprintln!("Error: {}", e.to_string()),
       }
     },
+    Operation::ListDevices =>
+      match battery::get_devices() {
+        Ok(val) => val.iter().for_each(|it| {
+          println!("{}", it);
+        }),
+        Err(e) => eprintln!("Error: {}", e),
+      },
   }
 }
