@@ -19,11 +19,13 @@
 
 use clap::{Parser, ValueEnum};
 mod battery;
+mod daemon;
 
 #[derive(ValueEnum, Clone, Debug)]
 enum Operation {
   GetProperty,
   ListDevices,
+  Daemon,
 }
 
 #[derive(Parser)]
@@ -52,5 +54,10 @@ fn main() {
         }),
         Err(e) => eprintln!("Error: {}", e),
       },
+    Operation::Daemon =>
+      match daemon::start() {
+        Ok(_) => (),
+        Err(e) => eprintln!("Error: {}", e),
+      }
   }
 }
