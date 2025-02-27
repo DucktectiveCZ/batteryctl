@@ -37,7 +37,7 @@ impl fmt::Display for BatteryError {
 
 impl std::error::Error for BatteryError { }
 
-const BATTERIES_DIRECTORY: &str = "/sys/class/power_supply/";
+pub const BATTERIES_DIRECTORY: &str = "/sys/class/power_supply/";
 
 #[allow(dead_code)]
 pub fn get_device_property_raw(battery_name: &String, property_name: &str) -> Result<String, BatteryError> {
@@ -47,7 +47,7 @@ pub fn get_device_property_raw(battery_name: &String, property_name: &str) -> Re
     .to_string_lossy()
     .into_owned();
   match fs::read_to_string(path) {
-    Ok(content) => Ok(content),
+    Ok(content) => Ok(content[..content.len() - 1].to_string()),
     Err(e) => Err(BatteryError::IOError(e.to_string())),
   }
 }

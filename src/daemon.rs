@@ -17,102 +17,178 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-use inotify::{EventMask, Inotify, WatchMask};
-use std::{fmt, path::PathBuf};
+use std::{fmt, process::Command, thread::sleep, time::Duration};
+
 use crate::battery;
 
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum DaemonError {
-  IOError(String),
-  AsyncError(String),
-  INotifyError(String),
+    IO(String),
+    Async(String),
+    INotify(String),
 }
 
 impl std::error::Error for DaemonError { }
 
 impl fmt::Display for DaemonError {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    match self {
-      Self::IOError(e) => write!(f, "IO error: {}", e),
-      Self::AsyncError(e) => write!(f, "Async error: {}", e),
-      Self::INotifyError(e) => write!(f, "INotify error: {}", e),
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::IO(e) => write!(f, "IO error: {}", e),
+            Self::Async(e) => write!(f, "Async error: {}", e),
+            Self::INotify(e) => write!(f, "INotify error: {}", e),
+        }
     }
-  }
 }
 
-const BATTERIES_DIRECTORY: &str = "/sys/class/power_supply/";
+pub struct DaemonConfig {
+    pub battery: String,
+    pub read_delay_ms: u64,
+    pub good_capacity: u8,
+    pub okay_capacity: u8,
+    pub bad_capacity: u8,
+    pub critical_capacity: u8,
+    pub good_capacity_handler: Option<String>,
+    pub okay_capacity_handler: Option<String>,
+    pub bad_capacity_handler: Option<String>,
+    pub critical_capacity_handler: Option<String>,
+}
+
+impl std::fmt::Display for DaemonConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f,
+            "battery: {}, read_delay: {}, good_capacity: {}, okay_capacity: {}, bad_capacity: {}, critical_capacity: {}",
+            self.battery,
+            self.read_delay_ms,
+            self.good_capacity,
+            self.okay_capacity,
+            self.bad_capacity,
+            self.critical_capacity )
+    }
+}
+
+struct Status {
+    pub good_handled: bool,
+    pub okay_handled: bool,
+    pub bad_handled: bool,
+    pub critical_handled: bool,
+}
+
+impl Status {
+    fn new() -> Status {
+        Self {
+            good_handled: false,
+            okay_handled: false,
+            bad_handled: false,
+            critical_handled: false,
+        }
+    }
+}
 
 #[allow(dead_code)]
-pub fn start() -> Result<(), DaemonError> {
-  eprintln!("Feature not implemented");
-  let mut inotify_instance: Inotify;
-  match Inotify::init() {
-    Ok(val) => inotify_instance = val,
-    Err(e) => return Err(DaemonError::INotifyError(e.to_string())),
-  }
-  
-  match add_watches(&inotify_instance) {
-    Ok(_) => (),
-    Err(e) => return Err(e),
-  }
+pub fn start(config: &DaemonConfig) -> Result<(), DaemonError> {
+    println!("[WARN] Feature not fully implemented yet!");
+    println!("[INFO] Starting batteryctl daemon with config {}", config);
 
-  loop {
-    let _ = handle_events(&mut inotify_instance);
-  }
-}
+    let mut status = Status::new();
 
-fn watch_file<TCallback>(inotify_instance: &Inotify, file: String, callback: TCallback) -> Result<(), DaemonError>
-where TCallback: Fn()
-{
-  Ok(())
-}
+    let mut capacity_buf: u8;
 
-fn handle_events(inotify_instance: &mut Inotify) -> Result<(), DaemonError> {
-  let mut buffer = [0; 1024]; 
-
-  let events = match inotify_instance.read_events_blocking(&mut buffer) {
-    Ok(val) => val,
-    Err(e) => return Err(DaemonError::INotifyError(e.to_string())),
-  };
-
-  for event in events {
-    if event.mask.contains(EventMask::MODIFY) {
-      if let Some(name) = event.name {
-        match modified(&name.to_string_lossy().into_owned()) {
-          Ok(_) => (),
-          Err(e) => return Err(e),
+    loop {
+        match battery::get_device_property_raw(&config.battery, "capacity") {
+            Ok(val) => capacity_buf = val.parse::<u8>().unwrap(),
+            Err(e) => return Err(DaemonError::IO(e.to_string())),
         }
-      } else {
-        return Err(DaemonError::INotifyError("@event.name is None".to_string()));
-      }
+
+        match handle_capacity(config, &capacity_buf, &mut status) {
+            Ok(_) => println!("[INFO] Capacity handled."),
+            Err(e) => return Err(e),
+        }
+
+        sleep(Duration::from_millis(config.read_delay_ms));
     }
-  }
-  Ok(())
 }
 
-fn modified(file: &String) -> Result<(), DaemonError> {
-  Ok(())
+fn handle_capacity(config: &DaemonConfig, capacity: &u8, status: &mut Status) -> Result<(), DaemonError> {
+    if !status.critical_handled && *capacity <= config.critical_capacity {
+        handle_critical(config);
+    }
+    else if !status.bad_handled && *capacity <= config.bad_capacity {
+        handle_bad(config);
+    }
+    else if !status.okay_handled && *capacity <= config.okay_capacity {
+        handle_okay(config);
+    }
+    else if !status.good_handled && *capacity >= config.good_capacity {
+        handle_good(config);
+    } else {
+        handle_other();
+    }
+
+    Ok(())
 }
 
-fn add_watches(inotify_instance: &Inotify) -> Result<(), DaemonError> {
-  let properties = vec![
-    "capacity",
-  ];
-  let batteries = battery::get_devices()
-    .into_iter()
-    .filter(|s| s.starts_with());
-  for property in properties {
-    let mut path = PathBuf::from(BATTERIES_DIRECTORY);
-    path.push(property);
-    println!("Adding: {}", path.to_string_lossy().to_owned());
-    match inotify_instance
-      .watches()
-      .add(path, WatchMask::MODIFY) {
-      Ok(_) => (),
-      Err(e) => return Err(DaemonError::INotifyError(e.to_string())),
+fn handle_good(config: &DaemonConfig) {
+    println!("[INFO] Good capacity");
+
+    if let Some(handler) = &config.good_capacity_handler {
+        let status = Command::new("bash")
+            .arg("-c")
+            .arg(handler)
+            .status();
+
+        match status {
+            Ok(_) => (),
+            Err(e) => eprintln!("[ERROR] Good capacity handler failed: {}", e),
+        }
     }
-  }
-  Ok(())
+}
+fn handle_okay(config: &DaemonConfig) {
+    println!("[INFO] Okay capacity");
+
+    if let Some(handler) = &config.okay_capacity_handler {
+        let status = Command::new("bash")
+            .arg("-c")
+            .arg(handler)
+            .status();
+
+        match status {
+            Ok(_) => (),
+            Err(e) => eprintln!("[ERROR] Okay capacity handler failed: {}", e),
+        }
+    }
+}
+fn handle_bad(config: &DaemonConfig) {
+    println!("[INFO] Bad capacity");
+
+    if let Some(handler) = &config.bad_capacity_handler {
+        let status = Command::new("bash")
+            .arg("-c")
+            .arg(handler)
+            .status();
+
+        match status {
+            Ok(_) => (),
+            Err(e) => eprintln!("[ERROR] Bad capacity handler failed: {}", e),
+        }
+    }
+}
+fn handle_critical(config: &DaemonConfig) {
+    println!("[INFO] Critical capacity");
+
+    if let Some(handler) = &config.good_capacity_handler {
+        let status = Command::new("bash")
+            .arg("-c")
+            .arg(handler)
+            .status();
+
+        match status {
+            Ok(_) => (),
+            Err(e) => eprintln!("[ERROR] Critical capacity handler failed: {}", e),
+        }
+    }
+}
+fn handle_other() {
+    println!("[WARN] Unknown capacity");
 }
 
