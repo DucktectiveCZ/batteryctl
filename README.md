@@ -13,7 +13,15 @@
 
 To build and install **batteryctl**, you need Rust and Cargo installed on your system.
 
-### Scripted install
+### AUR Install
+
+**Batteryctl** is available in the Arch User Repository.
+
+```Bash
+yay -S batteryctl
+```
+
+### Scripted Install
 
 Clone the repository and run the install script.
 
@@ -24,7 +32,7 @@ chmod +x ./install_linux.sh
 ./install_linux.sh
 ```
 
-### Manual install
+### Manual Install
 
 Clone the repository, build the project and copy the binaries into '/usr/local/bin/'.
 ```Bash
@@ -46,6 +54,15 @@ batteryctl <OPERATION> [<ARGS>]
 
 - `<OPERATION>`: The action to perform.
 - `<ARGS>`: Additional arguments for the operation.
+
+### Operations:
+
+- `get-property`: Get a battery property.
+- `list-devices`: List the available devices.
+- `daemon`: Start the daemon.
+- `config-get`: Get a value from the batteryctl config.
+- `config-set`: Set a value in the batteryctl config.
+- `version` `v`: Print the batteryctl version.
 
 ### Arguments:
 

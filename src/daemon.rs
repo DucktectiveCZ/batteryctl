@@ -17,16 +17,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-use std::{fmt, process::Command, thread::sleep, time::Duration};
+use std::{collections::HashMap, fmt, process::Command, thread::sleep, time::Duration};
 
 use crate::battery;
+use crate::config;
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum DaemonError {
     IO(String),
-    Async(String),
-    INotify(String),
 }
 
 impl std::error::Error for DaemonError { }
@@ -35,160 +33,130 @@ impl fmt::Display for DaemonError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::IO(e) => write!(f, "IO error: {}", e),
-            Self::Async(e) => write!(f, "Async error: {}", e),
-            Self::INotify(e) => write!(f, "INotify error: {}", e),
         }
     }
 }
 
-pub struct DaemonConfig {
-    pub battery: String,
-    pub read_delay_ms: u64,
-    pub good_capacity: u8,
-    pub okay_capacity: u8,
-    pub bad_capacity: u8,
-    pub critical_capacity: u8,
-    pub good_capacity_handler: Option<String>,
-    pub okay_capacity_handler: Option<String>,
-    pub bad_capacity_handler: Option<String>,
-    pub critical_capacity_handler: Option<String>,
-}
-
-impl std::fmt::Display for DaemonConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f,
-            "battery: {}, read_delay: {}, good_capacity: {}, okay_capacity: {}, bad_capacity: {}, critical_capacity: {}",
-            self.battery,
-            self.read_delay_ms,
-            self.good_capacity,
-            self.okay_capacity,
-            self.bad_capacity,
-            self.critical_capacity )
-    }
-}
-
-struct Status {
+struct BatteryStatus {
     pub good_handled: bool,
     pub okay_handled: bool,
     pub bad_handled: bool,
     pub critical_handled: bool,
 }
 
-impl Status {
-    fn new() -> Status {
+struct DaemonStatus {
+    pub batteries: HashMap<String, BatteryStatus>,
+}
+
+impl DaemonStatus {
+    pub fn new() -> DaemonStatus {
         Self {
-            good_handled: false,
-            okay_handled: false,
-            bad_handled: false,
-            critical_handled: false,
+            batteries: HashMap::new()
         }
     }
 }
 
-#[allow(dead_code)]
-pub fn start(config: &DaemonConfig) -> Result<(), DaemonError> {
-    println!("[WARN] Feature not fully implemented yet!");
-    println!("[INFO] Starting batteryctl daemon with config {}", config);
+pub fn start(config: &config::Config) -> Result<(), DaemonError> {
+    println!("[WARN] Beta feature");
+    // println!("[INFO] Starting batteryctl daemon with config {:?}", config);
 
-    let mut status = Status::new();
+    let mut status = DaemonStatus::new();
 
     let mut capacity_buf: u8;
 
     loop {
-        match battery::get_device_property_raw(&config.battery, "capacity") {
-            Ok(val) => capacity_buf = val.parse::<u8>().unwrap(),
-            Err(e) => return Err(DaemonError::IO(e.to_string())),
-        }
+        for bat in &config.batteries {
+            match battery::get_device_property_raw(bat, "capacity") {
+                Ok(val) => capacity_buf = val.parse::<u8>().unwrap(),
+                Err(e) => return Err(DaemonError::IO(e.to_string())),
+            }
 
-        match handle_capacity(config, &capacity_buf, &mut status) {
-            Ok(_) => println!("[INFO] Capacity handled."),
-            Err(e) => return Err(e),
+            match handle_capacity(config, &capacity_buf, &mut status, bat) {
+                Ok(_) => println!("[INFO] Capacity handled for {bat}."),
+                Err(e) => return Err(e),
+            }
         }
 
         sleep(Duration::from_millis(config.read_delay_ms));
     }
 }
 
-fn handle_capacity(config: &DaemonConfig, capacity: &u8, status: &mut Status) -> Result<(), DaemonError> {
-    if !status.critical_handled && *capacity <= config.critical_capacity {
-        handle_critical(config);
+// TODO: Set the handled variables
+fn handle_capacity(config: &config::Config, capacity: &u8, status: &mut DaemonStatus, bat: &String) -> Result<(), DaemonError> {
+    if !status.batteries[bat].critical_handled && *capacity <= config.critical_capacity {
+        handle_critical(config, bat);
     }
-    else if !status.bad_handled && *capacity <= config.bad_capacity {
-        handle_bad(config);
+    else if !status.batteries[bat].bad_handled && *capacity <= config.bad_capacity {
+        handle_bad(config, bat);
     }
-    else if !status.okay_handled && *capacity <= config.okay_capacity {
-        handle_okay(config);
+    else if !status.batteries[bat].okay_handled && *capacity <= config.okay_capacity {
+        handle_okay(config, bat);
     }
-    else if !status.good_handled && *capacity >= config.good_capacity {
-        handle_good(config);
-    } else {
-        handle_other();
+    else if !status.batteries[bat].good_handled {
+        handle_good(config, bat);
     }
 
     Ok(())
 }
 
-fn handle_good(config: &DaemonConfig) {
-    println!("[INFO] Good capacity");
+fn handle_good(config: &config::Config, bat: &String) {
+    println!("[INFO] Good capacity of {bat}");
 
     if let Some(handler) = &config.good_capacity_handler {
         let status = Command::new("bash")
             .arg("-c")
-            .arg(handler)
+            .arg(format!("{} {}", handler, bat))
             .status();
 
         match status {
             Ok(_) => (),
-            Err(e) => eprintln!("[ERROR] Good capacity handler failed: {}", e),
+            Err(e) => eprintln!("[ERROR] Good capacity handler failed: {e}"),
         }
     }
 }
-fn handle_okay(config: &DaemonConfig) {
+fn handle_okay(config: &config::Config, bat: &String) {
     println!("[INFO] Okay capacity");
 
     if let Some(handler) = &config.okay_capacity_handler {
         let status = Command::new("bash")
             .arg("-c")
-            .arg(handler)
+            .arg(format!("{} {}", handler, bat))
             .status();
 
         match status {
             Ok(_) => (),
-            Err(e) => eprintln!("[ERROR] Okay capacity handler failed: {}", e),
+            Err(e) => eprintln!("[ERROR] Okay capacity handler failed: {e}"),
         }
     }
 }
-fn handle_bad(config: &DaemonConfig) {
+fn handle_bad(config: &config::Config, bat: &String) {
     println!("[INFO] Bad capacity");
 
     if let Some(handler) = &config.bad_capacity_handler {
         let status = Command::new("bash")
             .arg("-c")
-            .arg(handler)
+            .arg(format!("{} {}", handler, bat))
             .status();
 
         match status {
             Ok(_) => (),
-            Err(e) => eprintln!("[ERROR] Bad capacity handler failed: {}", e),
+            Err(e) => eprintln!("[ERROR] Bad capacity handler failed: {e}"),
         }
     }
 }
-fn handle_critical(config: &DaemonConfig) {
+fn handle_critical(config: &config::Config, bat: &String) {
     println!("[INFO] Critical capacity");
 
     if let Some(handler) = &config.critical_capacity_handler {
         let status = Command::new("bash")
             .arg("-c")
-            .arg(handler)
+            .arg(format!("{} {}", handler, bat))
             .status();
 
         match status {
             Ok(_) => (),
-            Err(e) => eprintln!("[ERROR] Critical capacity handler failed: {}", e),
+            Err(e) => eprintln!("[ERROR] Critical capacity handler failed: {e}"),
         }
     }
-}
-fn handle_other() {
-    println!("[WARN] Unknown capacity");
 }
 
