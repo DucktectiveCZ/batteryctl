@@ -176,7 +176,7 @@ fn handle_bad(config: &DaemonConfig) {
 fn handle_critical(config: &DaemonConfig) {
     println!("[INFO] Critical capacity");
 
-    if let Some(handler) = &config.good_capacity_handler {
+    if let Some(handler) = &config.critical_capacity_handler {
         let status = Command::new("bash")
             .arg("-c")
             .arg(handler)
