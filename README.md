@@ -20,6 +20,10 @@ To build and install **batteryctl**, you need Rust and Cargo installed on your s
 ```Bash
 yay -S batteryctl
 ```
+or
+```Bash
+paru -S batteryctl
+```
 
 ### Scripted Install
 
